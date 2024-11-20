@@ -3302,6 +3302,9 @@ extern "C" int ValkeyModule_OnLoad(ValkeyModuleCtx *ctx) {
     if (!set_command_info(ctx, "JSON.SET", -4, ks_read_write_update, 1, std::make_tuple(0, 1, 0))) {
         return VALKEYMODULE_ERR;
     }
+    if (!set_command_info(ctx, "JSON.MSET", -4, ks_read_write_update, 1, std::make_tuple(0, 1, 0))) {
+        return VALKEYMODULE_ERR;
+    }
     // Commands under RW + Insert
     if (!set_command_info(ctx, "JSON.ARRAPPEND", -4, ks_read_write_insert, 1, std::make_tuple(0, 1, 0))) {
         return VALKEYMODULE_ERR;
