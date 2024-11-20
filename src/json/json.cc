@@ -285,10 +285,6 @@ STATIC JsonUtilCode parseMSetCmdArgs(ValkeyModuleString **argv, const int argc, 
 
     memset(args_list, 0, num_keys * sizeof(MSetCmdArgs));
 
-    if (args_list == NULL) {
-        return JSONUTIL_MEMORY_ERROR;
-    }
-
     for (size_t i = 0; i < num_keys; ++i) {
         args_list[i].key = argv[i * 3 + 1];
         args_list[i].path = ValkeyModule_StringPtrLen(argv[i * 3 + 2], nullptr);
