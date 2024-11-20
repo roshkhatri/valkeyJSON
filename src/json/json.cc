@@ -278,7 +278,7 @@ STATIC JsonUtilCode parseMSetCmdArgs(ValkeyModuleString **argv, const int argc, 
     }
     size_t num_keys = (argc - 1) / 3;
 
-    MSetCmdArgs *args_list = (MSetCmdArgs *)ValkeyModule_Malloc(num_keys * sizeof(MSetCmdArgs));
+    MSetCmdArgs *args_list = (MSetCmdArgs *)ValkeyModule_Alloc(num_keys * sizeof(MSetCmdArgs));
     if (args_list == NULL) {
         return JSONUTIL_MEMORY_ERROR;
     }
