@@ -178,8 +178,12 @@ class TestJsonBasic(JsonTestCase):
 
         assert b'OK' == client.execute_command(
             'JSON.SET', k2, '.', '[1,2,3,4,5]')
-        assert [b'{"a":"1","b":"2","c":"3"}', b'[1,2,3,4,5]'] == client.execute_command(
+        assert b'OK' == client.execute_command(
+            'JSON.MSET', k2, '.', '[5,4,3,2,1]', k1, '.', '{"a":"1", "b":"2", "c":"3"}')
+        assert [b'{"a":"1","b":"2","c":"3"}', b'[5,4,3,2,1]'] == client.execute_command(
             'JSON.MGET', k1, k2, '.')
+        assert b'OK' == client.execute_command(
+            'JSON.SET', k2, '.', '[1,2,3,4,5]')
         assert b'{"a":"1","b":"2","c":"3"}' == client.execute_command(
             'JSON.GET', k1)
         for (key, path, exp) in [
