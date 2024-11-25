@@ -273,6 +273,32 @@ typedef struct {
     size_t num_keys;
 } MSetCmdArgsList;
 
+void FreeMSetCmdArgs(ValkeyModuleCtx *ctx, MSetCmdArgs *args_list, size_t num_keys) {
+    if (args_list == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < num_keys; i++) {
+        if (args_list[i].key_str != NULL) {
+            ValkeyModule_FreeString(ctx, args_list[i].key_str);
+        }
+
+        if (args_list[i].key != NULL) {
+            ValkeyModule_CloseKey(args_list[i].key);
+        }
+
+        if (args_list[i].path != NULL) {
+            ValkeyModule_Free((void*)args_list[i].path);
+        }
+
+        if (args_list[i].json != NULL) {
+            ValkeyModule_Free((void*)args_list[i].json);
+        }
+    }
+
+    ValkeyModule_Free(args_list);
+}
+
 STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModuleString **argv, const int argc, MSetCmdArgsList *args) {
     // we need 3 arguments for each key for MSET
     ValkeyModule_Log(ctx, "notice", "argc: %d", argc);
@@ -284,6 +310,7 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
 
     MSetCmdArgs *args_list = (MSetCmdArgs *)ValkeyModule_Alloc(num_keys * sizeof(MSetCmdArgs));
     if (args_list == NULL) {
+        FreeMSetCmdArgs(ctx, args_list, num_keys);
         return JSONUTIL_MEMORY_ERROR;
     }
 
@@ -298,6 +325,7 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
 
         int type = ValkeyModule_KeyType(args_list[i].key);
         if (type != VALKEYMODULE_KEYTYPE_EMPTY && ValkeyModule_ModuleTypeGetType(args_list[i].key) != DocumentType) {
+            FreeMSetCmdArgs(ctx, args_list, num_keys);
             return JSONUTIL_NOT_A_DOCUMENT_KEY;
         }
 
@@ -305,14 +333,17 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
         args_list[i].is_root_path = jsonutil_is_root_path(args_list[i].path);
 
         if (is_new_valkey_key && !args_list[i].is_root_path) {
-            // return ValkeyModule_ReplyWithError(ctx, ERRMSG_NEW_VALKEY_KEY_PATH_NOT_ROOT);
+            FreeMSetCmdArgs(ctx, args_list, num_keys);
             return JSONUTIL_COMMAND_SYNTAX_ERROR;
         }
         JDocument *doc;
+
         if (args_list[i].is_root_path) {
             rc = dom_parse(ctx, args_list[i].json, args_list[i].json_len, &doc);
-            if (rc != JSONUTIL_SUCCESS) return rc;
-
+            if (rc != JSONUTIL_SUCCESS) {
+                FreeMSetCmdArgs(ctx, args_list, num_keys);
+                return rc;
+            }
             if (json_is_instrument_enabled_insert() || json_is_instrument_enabled_update()) {
                 size_t len;
                 const char* key_cstr = ValkeyModule_StringPtrLen(args_list[i].key_str,&len);
@@ -325,11 +356,15 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
         } else {
             doc = static_cast<JDocument*>(ValkeyModule_ModuleTypeGetValue(args_list[i].key));
             if (doc == nullptr) {
+                FreeMSetCmdArgs(ctx, args_list, num_keys);
                 // return ValkeyModule_ReplyWithError(ctx, ERRMSG_JSON_DOCUMENT_NOT_FOUND);
                 return JSONUTIL_DOCUMENT_KEY_NOT_FOUND;
             }
             rc = dom_verify_value(ctx, doc, args_list[i].path, args_list[i].json);
-            if (rc != JSONUTIL_SUCCESS) return rc;
+            if (rc != JSONUTIL_SUCCESS) {
+                FreeMSetCmdArgs(ctx, args_list, num_keys);
+                return rc;
+            }
         }
     }
 
@@ -337,6 +372,8 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
 
     args->args_list = args_list;
     args->num_keys = num_keys;
+
+    FreeMSetCmdArgs(ctx, args_list, num_keys);
 
     return JSONUTIL_SUCCESS;
 }
