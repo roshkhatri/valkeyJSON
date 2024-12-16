@@ -10,12 +10,10 @@ EXECUTE_PROCESS(
     OUTPUT_VARIABLE ARCHITECTURE
 )
 
-if("${ARCHITECTURE}" STREQUAL "x86_64")
-    message("Building JSON for x86_64")
-elseif("${ARCHITECTURE}" STREQUAL "aarch64")
-    message("Building JSON for aarch64")
+if("${ARCHITECTURE}" STREQUAL "x86_64" OR "${ARCHITECTURE}" STREQUAL "aarch64")
+    message("Building valkeyJSON for ${ARCHITECTURE}")
 else()
-    message(FATAL_ERROR "Unsupported architecture. JSON is only supported on x86_64 and aarch64.")
+    message(FATAL_ERROR "Unsupported architecture: ${ARCHITECTURE}. valkeyJSON is only supported on x86_64 and aarch64.")
 endif()
 
 # Project definition
@@ -27,6 +25,19 @@ set(JSON_MODULE_LIB json)
 # Define the Valkey directories
 set(VALKEY_DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/_deps/valkey-src")
 set(VALKEY_BIN_DIR "${CMAKE_BINARY_DIR}/_deps/valkey-src/src/valkey/src")
+
+# Valkey version
+if(NOT VALKEY_VERSION)
+    set(VALKEY_VERSION unstable)
+endif()
+message("Valkey version: ${VALKEY_VERSION}")
+
+# Compiler flags that can be overridden in command line
+if(NOT CFLAGS)
+    # Include debug symbols and set optimize level
+    set(CFLAGS "-g -O3 -fno-omit-frame-pointer -Wall -Werror -Wextra")
+endif()
+message("CFLAGS: ${CFLAGS}")
 
 # Download and build Valkey
 ExternalProject_Add(
@@ -114,26 +125,20 @@ set(CMAKE_C_STANDARD_REQUIRED True)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-# Always include debug symbols and optimize the code
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -g")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -g")
-
-# RapidJSON SIMD optimization
-if("${ARCHITECTURE}" STREQUAL "x86_64")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=nehalem")
-elseif("${ARCHITECTURE}" STREQUAL "aarch64")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8-a")
-else()
-    message(FATAL_ERROR "Unsupported architecture. JSON is only supported on x86_64 and aarch64.")
-endif()
-
 # Additional flags for all architectures
 set(ADDITIONAL_FLAGS "-fPIC")
 
-# Compiler warning flags
-set(C_WARNING "-Wall -Werror -Wextra")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ADDITIONAL_FLAGS} ${C_WARNING}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ADDITIONAL_FLAGS} ${C_WARNING}")
+# RapidJSON SIMD optimization
+if("${ARCHITECTURE}" STREQUAL "x86_64")
+    set(ADDITIONAL_FLAGS "${ADDITIONAL_FLAGS} -march=nehalem")
+elseif("${ARCHITECTURE}" STREQUAL "aarch64")
+    set(ADDITIONAL_FLAGS "${ADDITIONAL_FLAGS} -march=armv8-a")
+endif()
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CFLAGS} ${ADDITIONAL_FLAGS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CFLAGS} ${ADDITIONAL_FLAGS}")
+message("CMAKE_C_FLAGS: ${CMAKE_C_FLAGS}")
+message("CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
 
 # Fetch RapidJSON
 FetchContent_Declare(
@@ -150,14 +155,12 @@ set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "Build rapidjson documentation" FORCE)
 # Make Rapidjson available
 FetchContent_MakeAvailable(rapidjson)
 
-# Add the src subdirectory for building
 add_subdirectory(src)
 
-# Add the src subdirectory for building
 add_subdirectory(tst)
 
 add_custom_target(test
-    COMMENT "Run JSON integration tests."
+    COMMENT "Run valkeyJSON integration tests"
     USES_TERMINAL
     COMMAND rm -rf ${CMAKE_BINARY_DIR}/tst/integration
     COMMAND mkdir -p ${CMAKE_BINARY_DIR}/tst/integration

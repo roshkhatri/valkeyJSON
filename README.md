@@ -4,27 +4,46 @@ ValkeyJSON is a C++ Valkey-Module that provides native JSON (JavaScript Object N
 
 ValkeyJSON leverages [RapidJSON](https://rapidjson.org/), a high-performance JSON parser and generator for C++, chosen for its small footprint and exceptional performance and memory efficiency. As a header-only library with no external dependencies, RapidJSON provides robust Unicode support while maintaining a compact memory profile of just 16 bytes per JSON value on most 32/64-bit machines.
 
-## Motivation
-While Valkey core lacks native JSON support, there's significant community demand for JSON capabilities. ValkeyJSON provides a comprehensive open-source solution with extensive JSON manipulation features.
-
 ## Building and Testing
 
 #### To build the module and run tests
 ```text
-# Builds the valkey-server (unstable) for integration testing.
-export SERVER_VERSION=unstable
+# Build valkey-server (unstable) and run integration tests
 ./build.sh
+```
 
-# Builds the valkey-server (8.0.0) for integration testing.
-export SERVER_VERSION=8.0.0
-./build.sh
+The default valkey version is "unstable". To override it, do:
+```text
+# Build valkey-server (8.0.0) and run integration tests
+SERVER_VERSION=8.0.0 ./build.sh
+```
+
+Custom compiler flags can be passed to the build script via environment variable CFLAGS. For example:
+```text
+CFLAGS="-O0 -Wno-unused-function" ./build.sh
 ```
 
 #### To build just the module
 ```text
 mdkir build
 cd build
-cmake .. -DVALKEY_VERSION=unstable
+cmake ..
+make
+```
+
+The default valkey version is "unstable". To override it, do:
+```text
+mdkir build
+cd build
+cmake .. -DVALKEY_VERSION=8.0.0
+make
+```
+
+Custom compiler flags can be passed to cmake via variable CFLAGS. For example:
+```text
+mdkir build
+cd build
+cmake .. -DCFLAGS="-O0 -Wno-unused-function"
 make
 ```
 
@@ -37,6 +56,16 @@ make -j unit
 #### To run all integration tests:
 ```text
 make -j test
+```
+
+#### To run one integration test:
+```text
+TEST_PATTERN=<test-function-or-file> make -j test
+```
+e.g.,
+```text
+TEST_PATTERN=test_sanity make -j test
+TEST_PATTERN=test_rdb.py make -j test
 ```
 
 ## Load the Module
@@ -75,7 +104,7 @@ JSON.DEL
 JSON.FORGET
 JSON.GET
 JSON.MGET
-JSON.MSET
+JSON.MSET (#16)
 JSON.NUMINCRBY
 JSON.NUMMULTBY
 JSON.OBJLEN

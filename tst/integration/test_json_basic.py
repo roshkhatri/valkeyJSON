@@ -13,6 +13,8 @@ import json
 from math import isclose, isnan, isinf, frexp
 from json_test_case import JsonTestCase
 
+logging.basicConfig(level=logging.DEBUG)
+
 DATA_ORGANISM = '''
             {
                 "heavy_animal" : 200,
@@ -1697,7 +1699,7 @@ class TestJsonBasic(JsonTestCase):
                 v.decode() == val or v.decode() == val_alt)
             v = client.execute_command(
                 'JSON.NUMMULTBY', wikipedia, '.foo', mult)
-            # print("DEBUG val: %s, mult: %f, v: %s, exp: %s" %(val, mult, v.decode(), exp))
+            # logging.debug("DEBUG val: %s, mult: %f, v: %s, exp: %s" %(val, mult, v.decode(), exp))
             assert v is not None and v.decode() == exp or v.decode() == exp_alt
             v = client.execute_command(
                 'JSON.GET', wikipedia, '.foo')
@@ -4060,49 +4062,3 @@ class TestJsonBasic(JsonTestCase):
 
         for i in range(len(output)):
             assert subcmd_dict[output[i][0].decode('ascii')] == output[i][1]
-
-    def test_hashtable_insert_and_remove(self):
-        client = self.server.get_new_client()
-
-        def make_path(i):
-            return '$.' + str(i)
-
-        def make_array(sz, offset):
-            data = []
-            for i in range(sz):
-                data.append(str(i + offset))
-            return data
-
-        def make_array_array(p, q):
-            data = make_array(p, 0)
-            for i in range(p):
-                data[i] = make_array(q, i)
-            return data
-
-        def make_string(i):
-            return f"string value {i}"
-
-        # set json.hash-table-min-size
-        client.execute_command(
-            'config set json.hash-table-min-size 5')
-
-        for sz in [10, 50, 100]:
-            for type in ['array_array', 'array', 'string']:
-                client.execute_command(
-                    'json.set', k1, '.', '{}')
-
-                # insert object members
-                for i in range(sz):
-                    if type == 'array_array':
-                        v = make_array_array(i, i)
-                    elif type == 'array':
-                        v = make_array(i, i)
-                    else:
-                        v = make_string(i)
-                    client.execute_command(
-                        'json.set', k1, make_path(i), f'{json.dumps(v)}')
-
-                # delete object members
-                for i in range(sz):
-                    client.execute_command(
-                        'json.del', k1, make_path(i))

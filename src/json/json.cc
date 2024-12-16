@@ -8,16 +8,15 @@
  * 4. register commands that are all prefixed with "JSON.".
  *
  * Design Considerations:
- * 1. Command API: see API.md.
- * 2. All JSON CRUD operations should be delegated to the DOM module.
- * 3. Shared utility/helper code should reside in the UTIL module.
- * 4. When invoking a DOM or UTIL method tha returns a heap-allocated object, the caller must release the memory
+ * 1. All JSON CRUD operations should be delegated to the DOM module.
+ * 2. Shared utility/helper code should reside in the UTIL module.
+ * 3. When invoking a DOM or UTIL method tha returns a heap-allocated object, the caller must release the memory
  *    after consuming it.
- * 5. The first line of every command handler should be: "ValkeyModule_AutoMemory(ctx);". This is for enabling
+ * 4. The first line of every command handler should be: "ValkeyModule_AutoMemory(ctx);". This is for enabling
  *    auto memory management for the command.
- * 6. Every write command must support replication. Call "ValkeyModule_ReplicateVerbatim(ctx)" to tell Valkey to
+ * 5. Every write command must support replication. Call "ValkeyModule_ReplicateVerbatim(ctx)" to tell Valkey to
  *    replicate the command.
- * 7. Any write command that increases total memory utilization, should be created using "write deny-oom" flags.
+ * 6. Any write command that increases total memory utilization, should be created using "write deny-oom" flags.
  *    e.g., JSON.SET should be defined as "write deny-oom", while JSON.DEL does not need "deny-oom" as it can't
  *    increase the total memory.
  *
@@ -70,11 +69,11 @@ static size_t config_max_recursive_descent_tokens = DEFAULT_MAX_RECURSIVE_DESCEN
 #define DEFAULT_MAX_QUERY_STRING_SIZE (128 * 1024)  // 128KB
 static size_t config_max_query_string_size = DEFAULT_MAX_QUERY_STRING_SIZE;
 
+#define DEFAULT_KEY_TABLE_SHARDS 32768
+#define DEFAULT_HASH_TABLE_MIN_SIZE 64
 KeyTable *keyTable = nullptr;
 rapidjson::HashTableFactors rapidjson::hashTableFactors;
 rapidjson::HashTableStats   rapidjson::hashTableStats;
-
-bool enforce_rdb_version_check = false;
 
 extern size_t hash_function(const char *text, size_t length);
 
@@ -2382,58 +2381,6 @@ void Module_Info(ValkeyModuleInfoCtx *ctx, int for_crash_report) {
         addULongLong("total_memory_bytes", jsonstats_get_used_mem() + keyTable->getStats().bytes);
         addULongLong("num_documents", jsonstats_get_num_doc_keys());
     endSection();
-
-    beginSection("ext_metrics")
-        addULongLong("max_path_depth_ever_seen", jsonstats_get_max_depth_ever_seen());
-        addULongLong("max_document_size_ever_seen", jsonstats_get_max_size_ever_seen());
-        addULongLong("total_malloc_bytes_used", memory_usage());
-        addULongLong("memory_traps_enabled", memory_traps_enabled());
-        addULongLong("defrag_count", jsonstats_get_defrag_count());
-        addULongLong("defrag_bytes", jsonstats_get_defrag_bytes());
-    endSection();
-
-    beginSection("document_composition")
-        addULongLong("boolean_count", logical_stats.boolean_count);
-        addULongLong("number_count", logical_stats.number_count);
-        addULongLong("sum_extra_numeric_chars", logical_stats.sum_extra_numeric_chars);
-        addULongLong("string_count", logical_stats.string_count);
-        addULongLong("sum_string_chars", logical_stats.sum_string_chars);
-        addULongLong("null_count", logical_stats.null_count);
-        addULongLong("array_count", logical_stats.array_count);
-        addULongLong("sum_array_elements", logical_stats.sum_array_elements);
-        addULongLong("object_count", logical_stats.object_count);
-        addULongLong("sum_object_members", logical_stats.sum_object_members);
-        addULongLong("sum_object_key_chars", logical_stats.sum_object_key_chars);
-    endSection();
-
-    // section: histograms
-    beginSection("histograms")
-        char name[128];
-        char buf[1024];
-        snprintf(name, sizeof(name), "doc_histogram");
-        jsonstats_sprint_doc_hist(buf, sizeof(buf));
-        ValkeyModule_InfoAddFieldCString(ctx, name, buf);
-
-        snprintf(name, sizeof(name), "read_histogram");
-        jsonstats_sprint_read_hist(buf, sizeof(buf));
-        ValkeyModule_InfoAddFieldCString(ctx, name, buf);
-
-        snprintf(name, sizeof(name), "insert_histogram");
-        jsonstats_sprint_insert_hist(buf, sizeof(buf));
-        ValkeyModule_InfoAddFieldCString(ctx, name, buf);
-
-        snprintf(name, sizeof(name), "update_histogram");
-        jsonstats_sprint_update_hist(buf, sizeof(buf));
-        ValkeyModule_InfoAddFieldCString(ctx, name, buf);
-
-        snprintf(name, sizeof(name), "delete_histogram");
-        jsonstats_sprint_delete_hist(buf, sizeof(buf));
-        ValkeyModule_InfoAddFieldCString(ctx, name, buf);
-
-        snprintf(name, sizeof(name), "histogram_buckets");
-        jsonstats_sprint_hist_buckets(buf, sizeof(buf));
-        ValkeyModule_InfoAddFieldCString(ctx, name, buf);
-    endSection();
 }
 
 //
@@ -2524,58 +2471,30 @@ int handleSetNumShards(const void *v) {
     return VALKEYMODULE_OK;
 }
 
-int Config_GetInstrumentEnabled(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    return *static_cast<int*>(privdata);
+int configKeyTable() {
+    long long val = 100;
+    if (handleFactor(&KeyTable::Factors::grow, &val, "key-table-grow-factor") == VALKEYMODULE_ERR) return VALKEYMODULE_ERR;
+    val = 50;
+    if (handleFactor(&KeyTable::Factors::shrink, &val, "key-table-shrink-factor") == VALKEYMODULE_ERR) return VALKEYMODULE_ERR;
+    val = 25;
+    if (handleFactor(&KeyTable::Factors::minLoad, &val, "key-table-min-load-factor") == VALKEYMODULE_ERR) return VALKEYMODULE_ERR;
+    val = 85;
+    if (handleFactor(&KeyTable::Factors::maxLoad, &val, "key-table-max-load-factor") == VALKEYMODULE_ERR) return VALKEYMODULE_ERR;
+    val = DEFAULT_KEY_TABLE_SHARDS;
+    return handleSetNumShards(&val);
 }
 
-int Config_SetInstrumentEnabled(const char *name, int val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(err);
-    *static_cast<int*>(privdata) = val;
-    return VALKEYMODULE_OK;
-}
-
-//
-// Handle "config set json.enable-memory-traps"
-//
-int Config_GetMemoryTrapsEnable(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    return memory_traps_enabled();
-}
-
-int Config_SetMemoryTrapsEnable(const char *name, int value, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(err);
-    VALKEYMODULE_NOT_USED(privdata);
-    ValkeyModule_Log(nullptr, "warning", "Changing memory traps to %d", value);
-    size_t num_json_keys = jsonstats_get_num_doc_keys();
-    auto s = keyTable->getStats();
-    if (num_json_keys > 0 || s.handles != 0) {
-        static char errmsg[] = "Can't change memory traps with JSON data present";
-        *err = ValkeyModule_CreateString(nullptr, errmsg, strlen(errmsg));
-        ValkeyModule_Log(nullptr, "warning", "Can't change memory traps with %zu JSON keys present", num_json_keys);
-        return VALKEYMODULE_ERR;
-    }
-    auto shards = keyTable->getNumShards();
-    auto factors = destroyKeyTable();
-    ValkeyModule_Assert(memory_usage() == 0);
-    ValkeyModule_Assert(memory_traps_control(value));
-    initKeyTable(shards, factors);
-    return VALKEYMODULE_OK;
-}
-
-int Config_GetEnforceRdbVersionCheck(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    return *static_cast<bool*>(privdata)? 1 : 0;
-}
-
-int Config_SetEnforceRdbVersionCheck(const char *name, int val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(err);
-    *static_cast<bool*>(privdata) = (val == 1);
-    return VALKEYMODULE_OK;
+int configHashtable() {
+    long long val = 100;
+    if (handleHashTableFactor(&rapidjson::HashTableFactors::grow, &val, 100.f) == VALKEYMODULE_ERR) return VALKEYMODULE_ERR;
+    val = 50;
+    if (handleHashTableFactor(&rapidjson::HashTableFactors::shrink, &val, 100.f) == VALKEYMODULE_ERR) return VALKEYMODULE_ERR;
+    val = 25;
+    if (handleHashTableFactor(&rapidjson::HashTableFactors::minLoad, &val, 100.f) == VALKEYMODULE_ERR) return VALKEYMODULE_ERR;
+    val = 85;
+    if (handleHashTableFactor(&rapidjson::HashTableFactors::maxLoad, &val, 100.f) == VALKEYMODULE_ERR) return VALKEYMODULE_ERR;
+    val = DEFAULT_HASH_TABLE_MIN_SIZE;
+    return handleHashTableFactor(&rapidjson::HashTableFactors::minHTSize, &val, size_t(1));
 }
 
 long long Config_GetSizeConfig(const char *name, void *privdata) {
@@ -2590,189 +2509,12 @@ int Config_SetSizeConfig(const char *name, long long val, void *privdata, Valkey
     return VALKEYMODULE_OK;
 }
 
-long long Config_GetKeyTableGrowFactor(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    return keyTable->getStats().factors.grow * 100;
-}
-
-int Config_SetKeyTableGrowFactor(const char *name, long long val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(privdata);
-    VALKEYMODULE_NOT_USED(err);
-    return handleFactor(&KeyTable::Factors::grow, &val, name);
-}
-
-long long Config_GetKeyTableShrinkFactor(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    return keyTable->getStats().factors.shrink * 100;
-}
-
-int Config_SetKeyTableShrinkFactor(const char *name, long long val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(privdata);
-    VALKEYMODULE_NOT_USED(err);
-    return handleFactor(&KeyTable::Factors::shrink, &val, name);
-}
-
-long long Config_GetKeyTableMinLoadFactor(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    return keyTable->getStats().factors.minLoad * 100;
-}
-
-int Config_SetKeyTableMinLoadFactor(const char *name, long long val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(privdata);
-    VALKEYMODULE_NOT_USED(err);
-    return handleFactor(&KeyTable::Factors::minLoad, &val, name);
-}
-
-long long Config_GetKeyTableMaxLoadFactor(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    return keyTable->getStats().factors.maxLoad * 100;
-}
-
-int Config_SetKeyTableMaxLoadFactor(const char *name, long long val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(privdata);
-    VALKEYMODULE_NOT_USED(err);
-    return handleFactor(&KeyTable::Factors::maxLoad, &val, name);
-}
-
-long long Config_GetKeyTableNumShards(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    return keyTable->getNumShards();
-}
-
-int Config_SetKeyTableNumShards(const char *name, long long val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    VALKEYMODULE_NOT_USED(err);
-    return handleSetNumShards(&val);
-}
-
-long long Config_GetHashTableGrowFactor(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    return rapidjson::hashTableFactors.grow * 100;
-}
-
-int Config_SetHashTableGrowFactor(const char *name, long long val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    VALKEYMODULE_NOT_USED(err);
-    return handleHashTableFactor(&rapidjson::HashTableFactors::grow, &val, 100.f);
-}
-
-long long Config_GetHashTableShrinkFactor(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    return rapidjson::hashTableFactors.shrink * 100;
-}
-
-int Config_SetHashTableShrinkFactor(const char *name, long long val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    VALKEYMODULE_NOT_USED(err);
-    return handleHashTableFactor(&rapidjson::HashTableFactors::shrink, &val, 100.f);
-}
-
-long long Config_GetHashTableMinLoadFactor(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    return rapidjson::hashTableFactors.minLoad * 100;
-}
-
-int Config_SetHashTableMinLoadFactor(const char *name, long long val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    VALKEYMODULE_NOT_USED(err);
-    return handleHashTableFactor(&rapidjson::HashTableFactors::minLoad, &val, 100.f);
-}
-
-long long Config_GetHashTableMaxLoadFactor(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    return rapidjson::hashTableFactors.maxLoad * 100;
-}
-
-int Config_SetHashTableMaxLoadFactor(const char *name, long long val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    VALKEYMODULE_NOT_USED(err);
-    return handleHashTableFactor(&rapidjson::HashTableFactors::maxLoad, &val, 100.f);
-}
-
-long long Config_GetHashTableMinSize(const char *name, void *privdata) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    return rapidjson::hashTableFactors.minHTSize;
-}
-
-int Config_SetHashTableMinSize(const char *name, long long val, void *privdata, ValkeyModuleString **err) {
-    VALKEYMODULE_NOT_USED(name);
-    VALKEYMODULE_NOT_USED(privdata);
-    VALKEYMODULE_NOT_USED(err);
-    return handleHashTableFactor(&rapidjson::HashTableFactors::minHTSize, &val, size_t(1));
-}
-
 int registerModuleConfigs(ValkeyModuleCtx *ctx) {
-    REGISTER_BOOL_CONFIG(ctx, "enable-memory-traps", 0, nullptr,
-                         Config_GetMemoryTrapsEnable, Config_SetMemoryTrapsEnable)
-    REGISTER_BOOL_CONFIG(ctx, "enable-instrument-insert", 0, &instrument_enabled_insert,
-                         Config_GetInstrumentEnabled, Config_SetInstrumentEnabled)
-    REGISTER_BOOL_CONFIG(ctx, "enable-instrument-update", 0, &instrument_enabled_update,
-                         Config_GetInstrumentEnabled, Config_SetInstrumentEnabled)
-    REGISTER_BOOL_CONFIG(ctx, "enable-instrument-delete", 0, &instrument_enabled_delete,
-                         Config_GetInstrumentEnabled, Config_SetInstrumentEnabled)
-    REGISTER_BOOL_CONFIG(ctx, "enable-instrument-dump-doc-before", 0,
-                         &instrument_enabled_dump_doc_before,
-                         Config_GetInstrumentEnabled, Config_SetInstrumentEnabled)
-    REGISTER_BOOL_CONFIG(ctx, "enable-instrument-dump-doc-after", 0,
-                         &instrument_enabled_dump_doc_after,
-                         Config_GetInstrumentEnabled, Config_SetInstrumentEnabled)
-    REGISTER_BOOL_CONFIG(ctx, "enable-instrument-dump-value-before-delete", 0,
-                         &instrument_enabled_dump_value_before_delete,
-                         Config_GetInstrumentEnabled, Config_SetInstrumentEnabled)
-    REGISTER_BOOL_CONFIG(ctx, "enforce-rdb-version-check", 0, &enforce_rdb_version_check,
-                         Config_GetEnforceRdbVersionCheck, Config_SetEnforceRdbVersionCheck)
+    REGISTER_NUMERIC_CONFIG(ctx, "max-document-size", DEFAULT_MAX_DOCUMENT_SIZE, VALKEYMODULE_CONFIG_MEMORY,
+                            0, LLONG_MAX, &config_max_document_size, Config_GetSizeConfig, Config_SetSizeConfig)
 
-    REGISTER_NUMERIC_CONFIG(ctx, "max-document-size", DEFAULT_MAX_DOCUMENT_SIZE, VALKEYMODULE_CONFIG_MEMORY, 0,
-                            LLONG_MAX, &config_max_document_size, Config_GetSizeConfig, Config_SetSizeConfig)
-    REGISTER_NUMERIC_CONFIG(ctx, "defrag-threshold", DEFAULT_DEFRAG_THRESHOLD, VALKEYMODULE_CONFIG_MEMORY, 0,
-                            LLONG_MAX, &config_defrag_threshold, Config_GetSizeConfig, Config_SetSizeConfig)
-    REGISTER_NUMERIC_CONFIG(ctx, "max-path-limit", 128, VALKEYMODULE_CONFIG_DEFAULT, 0, INT_MAX,
-                            &config_max_path_limit, Config_GetSizeConfig, Config_SetSizeConfig)
-    REGISTER_NUMERIC_CONFIG(ctx, "max-parser-recursion-depth", 200, VALKEYMODULE_CONFIG_DEFAULT, 0,
-                            INT_MAX, &config_max_parser_recursion_depth, Config_GetSizeConfig,
-                            Config_SetSizeConfig)
-    REGISTER_NUMERIC_CONFIG(ctx, "max-recursive-descent-tokens", 20, VALKEYMODULE_CONFIG_DEFAULT, 0,
-                            INT_MAX, &config_max_recursive_descent_tokens, Config_GetSizeConfig,
-                            Config_SetSizeConfig)
-    REGISTER_NUMERIC_CONFIG(ctx, "max-query-string-size", 128*1024, VALKEYMODULE_CONFIG_DEFAULT, 0,
-                            INT_MAX, &config_max_query_string_size, Config_GetSizeConfig, Config_SetSizeConfig)
-
-    REGISTER_NUMERIC_CONFIG(ctx, "key-table-grow-factor", 100, VALKEYMODULE_CONFIG_DEFAULT, 0,
-                            INT_MAX, nullptr, Config_GetKeyTableGrowFactor, Config_SetKeyTableGrowFactor)
-    REGISTER_NUMERIC_CONFIG(ctx, "key-table-shrink-factor", 50, VALKEYMODULE_CONFIG_DEFAULT, 0,
-                            INT_MAX, nullptr, Config_GetKeyTableShrinkFactor, Config_SetKeyTableShrinkFactor)
-    REGISTER_NUMERIC_CONFIG(ctx, "key-table-min-load-factor", 25, VALKEYMODULE_CONFIG_DEFAULT, 0,
-                            INT_MAX, nullptr, Config_GetKeyTableMinLoadFactor, Config_SetKeyTableMinLoadFactor)
-    REGISTER_NUMERIC_CONFIG(ctx, "key-table-max-load-factor", 85, VALKEYMODULE_CONFIG_DEFAULT, 0,
-                            INT_MAX, nullptr, Config_GetKeyTableMaxLoadFactor, Config_SetKeyTableMaxLoadFactor)
-    REGISTER_NUMERIC_CONFIG(ctx, "key-table-num-shards", 32768, VALKEYMODULE_CONFIG_DEFAULT, KeyTable::MIN_SHARDS,
-                            KeyTable::MAX_SHARDS, nullptr, Config_GetKeyTableNumShards, Config_SetKeyTableNumShards)
-
-    REGISTER_NUMERIC_CONFIG(ctx, "hash-table-grow-factor", 100, VALKEYMODULE_CONFIG_DEFAULT, 0,
-                            INT_MAX, nullptr, Config_GetHashTableGrowFactor, Config_SetHashTableGrowFactor)
-    REGISTER_NUMERIC_CONFIG(ctx, "hash-table-shrink-factor", 50, VALKEYMODULE_CONFIG_DEFAULT, 0,
-                            INT_MAX, nullptr, Config_GetHashTableShrinkFactor, Config_SetHashTableShrinkFactor)
-    REGISTER_NUMERIC_CONFIG(ctx, "hash-table-min-load-factor", 25, VALKEYMODULE_CONFIG_DEFAULT, 0,
-                            INT_MAX, nullptr, Config_GetHashTableMinLoadFactor, Config_SetHashTableMinLoadFactor)
-    REGISTER_NUMERIC_CONFIG(ctx, "hash-table-max-load-factor", 85, VALKEYMODULE_CONFIG_DEFAULT, 0,
-                            INT_MAX, nullptr, Config_GetHashTableMaxLoadFactor, Config_SetHashTableMaxLoadFactor)
-    REGISTER_NUMERIC_CONFIG(ctx, "hash-table-min-size", 64, VALKEYMODULE_CONFIG_DEFAULT, 0, INT_MAX,
-                            nullptr, Config_GetHashTableMinSize, Config_SetHashTableMinSize)
+    REGISTER_NUMERIC_CONFIG(ctx, "max-path-limit", DEFAULT_MAX_PATH_LIMIT, VALKEYMODULE_CONFIG_DEFAULT,
+                            0, INT_MAX, &config_max_path_limit, Config_GetSizeConfig, Config_SetSizeConfig)
 
     ValkeyModule_LoadConfigs(ctx);
     return VALKEYMODULE_OK;
@@ -2798,64 +2540,22 @@ bool install_stub(ValkeyModuleCtx *ctx,
 }
 
 /*
- * Check a string value, fail if the expected value isn't present.
+ * Load a string value.
  */
-bool checkString(ValkeyModuleIO *ctx, const char *value, const char *caller) {
+bool loadString(ValkeyModuleIO *ctx, const char *caller) {
+    VALKEYMODULE_NOT_USED(caller);
     size_t str_len;
     std::unique_ptr<char> str(ValkeyModule_LoadStringBuffer(ctx, &str_len));
-    if (strncmp(value, str.get(), str_len)) {
-        ValkeyModule_Log(nullptr, "warning", "%s: Unexpected value in RDB. Expected %s Received %s",
-                        caller, value, str.get());
-        return false;
-    }
+    VALKEYMODULE_NOT_USED(str);
     return true;
 }
 
 /*
- * Check an integer value, fail
+ * Load an unsigned integer value
  */
-bool checkInt(ValkeyModuleIO *ctx, uint64_t value, const char *caller) {
-    uint64_t val = ValkeyModule_LoadUnsigned(ctx);
-    if (value != val) {
-        ValkeyModule_Log(nullptr, "warning", "%s: Unexpected value in RDB Expected: %lx Received: %lx",
-                        caller, value, val);
-        return false;
-    }
-    return true;
-}
-
-/*
- * Check the encoding version, For unsupported versions we ALWAYS put out a message in the log
- * but we only fail the RDB load if the config tells us to do it.
- */
-bool checkVersion(const char *type_name, int encver, int expected_encver) {
-    if (encver != expected_encver) {
-        if (enforce_rdb_version_check) {
-            ValkeyModule_Log(nullptr, "warning", "Unsupported Encoding Version %d for type:%s expected %d",
-                            encver, type_name, expected_encver);
-            return false;
-        } else {
-            ValkeyModule_Log(nullptr, "warning",
-                            "Unsupported Encoding Version %d for type:%s expected %d, WILL ATTEMPT LOADING ANYWAYS",
-                            encver, type_name, expected_encver);
-        }
-    }
-    return true;
-}
-
-bool checkVersionRange(const char *type_name, int encver, int ver_low, int ver_high) {
-    if (encver < ver_low || encver > ver_high) {
-        if (enforce_rdb_version_check) {
-            ValkeyModule_Log(nullptr, "warning", "Unsupported Encoding Version %d for type:%s expected [%d:%d]",
-                            encver, type_name, ver_low, ver_high);
-            return false;
-        } else {
-            ValkeyModule_Log(nullptr, "warning",
-                            "Unsupported Encoding Version %d for type:%s expected [%d:%d],"
-                            " WILL ATTEMPT TO LOAD ANYWAYS",
-                            encver, type_name, ver_low, ver_high);
-        }
-    }
+bool loadUnsigned(ValkeyModuleIO *ctx, const char *caller) {
+    VALKEYMODULE_NOT_USED(caller);
+    ValkeyModule_LoadUnsigned(ctx);
     return true;
 }
 
@@ -2864,33 +2564,53 @@ bool checkVersionRange(const char *type_name, int encver, int ver_low, int ver_h
  */
 #define SCDTYPE_ENCVER 1
 int scdtype_aux_load(ValkeyModuleIO *ctx, int encver, int when) {
-    if (!checkVersion("sdctype0", encver, SCDTYPE_ENCVER)) return VALKEYMODULE_ERR;
+    VALKEYMODULE_NOT_USED(encver);
     if (when == VALKEYMODULE_AUX_AFTER_RDB) {
-        if (!checkInt(ctx, 0, "scdtype")) return VALKEYMODULE_ERR;
+        if (!loadUnsigned(ctx, "scdtype")) return VALKEYMODULE_ERR;
     }
+    return VALKEYMODULE_OK;
+}
+
+/*
+ * Stub for ftindex0 data type. There is one integer of 0's.
+ * There's an 18, a 19 and a 20. They don't appear to be any different when the data is empty :)
+ */
+#define FTINDEX_ENCVER 20
+int ftindex_aux_load(ValkeyModuleIO *ctx, int encver, int when) {
+    VALKEYMODULE_NOT_USED(encver);
+    VALKEYMODULE_NOT_USED(when);
+    if (!loadUnsigned(ctx, "ftindex")) return VALKEYMODULE_ERR;
+    return VALKEYMODULE_OK;
+}
+
+#define GRAPHDT_ENCVER 11
+int graphdt_aux_load(ValkeyModuleIO *ctx, int encver, int when) {
+    VALKEYMODULE_NOT_USED(encver);
+    VALKEYMODULE_NOT_USED(when);
+    if (!loadUnsigned(ctx, "graphdt")) return VALKEYMODULE_ERR;
     return VALKEYMODULE_OK;
 }
 
 #define GEARSDT_ENCVER 3
 int gearsdt_aux_load(ValkeyModuleIO *ctx, int encver, int when) {
-    if (!checkVersion("gearsdt", encver, GEARSDT_ENCVER)) return VALKEYMODULE_ERR;
+    VALKEYMODULE_NOT_USED(encver);
     if (when == VALKEYMODULE_AUX_AFTER_RDB) {
-        if (!checkString(ctx, "StreamReader", "gears-dt")) return VALKEYMODULE_ERR;
-        if (!checkInt(ctx, 0, "gears-dt")) return VALKEYMODULE_ERR;
-        if (!checkString(ctx, "CommandReader", "gears-dt")) return VALKEYMODULE_ERR;
-        if (!checkInt(ctx, 0, "gears-dt")) return VALKEYMODULE_ERR;
-        if (!checkString(ctx, "KeysReader", "gears-dt")) return VALKEYMODULE_ERR;
-        if (!checkInt(ctx, 0, "gears-dt")) return VALKEYMODULE_ERR;
-        if (!checkString(ctx, "", "gears-dt")) return VALKEYMODULE_ERR;
+        if (!loadString(ctx, "gears-dt")) return VALKEYMODULE_ERR;
+        if (!loadUnsigned(ctx, "gears-dt")) return VALKEYMODULE_ERR;
+        if (!loadString(ctx, "gears-dt")) return VALKEYMODULE_ERR;
+        if (!loadUnsigned(ctx, "gears-dt")) return VALKEYMODULE_ERR;
+        if (!loadString(ctx, "gears-dt")) return VALKEYMODULE_ERR;
+        if (!loadUnsigned(ctx, "gears-dt")) return VALKEYMODULE_ERR;
+        if (!loadString(ctx, "gears-dt")) return VALKEYMODULE_ERR;
     }
     return VALKEYMODULE_OK;
 }
 
 #define GEARSRQ_ENCVER 1
 int gearsrq_aux_load(ValkeyModuleIO *ctx, int encver, int when) {
-    if (!checkVersion("gearsrq", encver, GEARSRQ_ENCVER)) return VALKEYMODULE_ERR;
+    VALKEYMODULE_NOT_USED(encver);
     if (when == VALKEYMODULE_AUX_BEFORE_RDB) {
-        if (!checkInt(ctx, 0, "gearsrq")) return VALKEYMODULE_ERR;
+        if (!loadUnsigned(ctx, "gearsrq")) return VALKEYMODULE_ERR;
     }
     return VALKEYMODULE_OK;
 }
@@ -3005,6 +2725,8 @@ extern "C" int ValkeyModule_OnLoad(ValkeyModuleCtx *ctx) {
      * Now create the stub datatypes for search
      */
     if (!install_stub(ctx, "scdtype00", SCDTYPE_ENCVER, scdtype_aux_load)) return VALKEYMODULE_ERR;
+    if (!install_stub(ctx, "ft_index0", FTINDEX_ENCVER, ftindex_aux_load)) return VALKEYMODULE_ERR;
+    if (!install_stub(ctx, "graphdata", GRAPHDT_ENCVER, graphdt_aux_load)) return VALKEYMODULE_ERR;
     if (!install_stub(ctx, "GEARS_DT0", GEARSDT_ENCVER, gearsdt_aux_load)) return VALKEYMODULE_ERR;
     if (!install_stub(ctx, "GEAR_REQ0", GEARSRQ_ENCVER, gearsrq_aux_load)) return VALKEYMODULE_ERR;
 
@@ -3417,6 +3139,10 @@ extern "C" int ValkeyModule_OnLoad(ValkeyModuleCtx *ctx) {
     // Setup the global string table
     //
     initKeyTable(KeyTable::MAX_SHARDS, KeyTable::Factors());
+    if (configKeyTable() == VALKEYMODULE_ERR) return VALKEYMODULE_ERR;
+    if (configHashtable() == VALKEYMODULE_ERR) return VALKEYMODULE_ERR;
+
+    // Register module configs
     if (registerModuleConfigs(ctx) == VALKEYMODULE_ERR) return VALKEYMODULE_ERR;
 
     return VALKEYMODULE_OK;
