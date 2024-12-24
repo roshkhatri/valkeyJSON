@@ -273,7 +273,7 @@ typedef struct {
     MSetCmdArgs *args_list;
 } MSetCmdArgsList;
 
-void FreeMSetCmdArgs(ValkeyModuleCtx *ctx, MSetCmdArgs *args_list, size_t num_keys) {
+STATIC void FreeMSetCmdArgs(ValkeyModuleCtx *ctx, MSetCmdArgs* args_list, size_t num_keys) {
     if (args_list == NULL) {
         return;
     }
@@ -295,8 +295,6 @@ void FreeMSetCmdArgs(ValkeyModuleCtx *ctx, MSetCmdArgs *args_list, size_t num_ke
             ValkeyModule_Free((void*)args_list[i].json);
         }
     }
-
-    ValkeyModule_Free(args_list);
 }
 
 STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModuleString **argv, const int argc, MSetCmdArgsList *args) {
@@ -307,7 +305,19 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
     size_t num_keys = (argc - 1) / 3;
     JsonUtilCode rc;
 
-    MSetCmdArgs *args_list = (MSetCmdArgs *)ValkeyModule_Alloc(num_keys * sizeof(MSetCmdArgs));
+    ValkeyModule_Log(ctx, "notice", "sizeof(MSetCmdArgsList)=%zu", sizeof(MSetCmdArgsList));
+    ValkeyModule_Log(ctx, "notice", "sizeof(MSetCmdArgs)=%zu", sizeof(MSetCmdArgs));
+    ValkeyModule_Log(ctx, "notice", "sizeof(num_keys)=%zu", sizeof(size_t));
+
+    memset(args, 0, sizeof(MSetCmdArgsList));
+
+    MSetCmdArgs *args_list = (MSetCmdArgs*)ValkeyModule_Alloc(num_keys * sizeof(MSetCmdArgs));
+    if (args_list == NULL) {
+        return JSONUTIL_MEMORY_ERROR;
+    }
+
+    memset(args_list, 0, num_keys * sizeof(MSetCmdArgs));
+
     if (args_list == NULL) {
         FreeMSetCmdArgs(ctx, args_list, num_keys);
         return JSONUTIL_MEMORY_ERROR;
@@ -332,13 +342,14 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
             FreeMSetCmdArgs(ctx, args_list, num_keys);
             return JSONUTIL_COMMAND_SYNTAX_ERROR;
         }
-        JDocument *doc;
         // begin tracking memory
         int64_t begin_val = jsonstats_begin_track_mem();
 
         if (args_list[i].is_root_path) {
+            JDocument *doc;
             rc = dom_parse(ctx, args_list[i].json, args_list[i].json_len, &doc);
             if (rc != JSONUTIL_SUCCESS) {
+                dom_free_doc(doc);
                 FreeMSetCmdArgs(ctx, args_list, num_keys);
                 return rc;
             }
@@ -356,25 +367,27 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
                                 key_hash, static_cast<void *>(doc));
                 DumpRedactedJValue(doc->GetJValue(), nullptr, "warning");
             }
+            dom_free_doc(doc);
         } else {
-            doc = static_cast<JDocument*>(ValkeyModule_ModuleTypeGetValue(args_list[i].key));
+            JDocument *doc = static_cast<JDocument*>(ValkeyModule_ModuleTypeGetValue(args_list[i].key));
             if (doc == nullptr) {
+                dom_free_doc(doc);
                 FreeMSetCmdArgs(ctx, args_list, num_keys);
                 // return ValkeyModule_ReplyWithError(ctx, ERRMSG_JSON_DOCUMENT_NOT_FOUND);
                 return JSONUTIL_DOCUMENT_KEY_NOT_FOUND;
             }
             rc = dom_verify_value(ctx, doc, args_list[i].path, args_list[i].json);
             if (rc != JSONUTIL_SUCCESS) {
+                dom_free_doc(doc);
                 FreeMSetCmdArgs(ctx, args_list, num_keys);
                 return rc;
             }
             // end tracking memory
             int64_t delta = jsonstats_end_track_mem(begin_val);
             args_list[i].doc_size = dom_get_doc_size(doc) + delta;
+            dom_free_doc(doc);
         }
     }
-
-    memset(args, 0, (num_keys * sizeof(MSetCmdArgs)) + sizeof(size_t));
 
     args->num_keys = num_keys;
     args->args_list = args_list;
@@ -790,11 +803,11 @@ int Command_JsonMSet(ValkeyModuleCtx *ctx, ValkeyModuleString **argv, int argc) 
             jsonstats_update_stats_on_update(doc, orig_doc_size, args.args_list[i].doc_size, args.args_list[i].json_len);
         }
 
-        ValkeyModule_NotifyKeyspaceEvent(ctx, VALKEYMODULE_NOTIFY_GENERIC, "json.mset", args.args_list[i].key_str);
     }
 
     // replicate the entire command
     ValkeyModule_ReplicateVerbatim(ctx);
+    ValkeyModule_NotifyKeyspaceEvent(ctx, VALKEYMODULE_NOTIFY_GENERIC, "json.mset", args.args_list[0].key_str);
     return ValkeyModule_ReplyWithSimpleString(ctx, "OK");
 }
 
