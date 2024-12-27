@@ -772,12 +772,11 @@ int Command_JsonMSet(ValkeyModuleCtx *ctx, ValkeyModuleString **argv, int argc) 
             // update stats
             jsonstats_update_stats_on_update(doc, orig_doc_size, args.args_list[i].doc_size, args.args_list[i].json_len);
         }
-
+        ValkeyModule_NotifyKeyspaceEvent(ctx, VALKEYMODULE_NOTIFY_GENERIC, "json.mset", args.args_list[i].key_str);
     }
 
     // replicate the entire command
     ValkeyModule_ReplicateVerbatim(ctx);
-    ValkeyModule_NotifyKeyspaceEvent(ctx, VALKEYMODULE_NOTIFY_GENERIC, "json.mset", args.args_list[0].key_str);
     return ValkeyModule_ReplyWithSimpleString(ctx, "OK");
 }
 

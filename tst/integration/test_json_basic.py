@@ -287,6 +287,29 @@ class TestJsonBasic(JsonTestCase):
                 'JSON.SET', key, '.', value)
             assert value.encode() == client.execute_command('JSON.GET', key)
 
+    def test_json_mset_command_root_document(self):
+        client = self.server.get_new_client()
+        # path to the root document is represented as '.'
+        assert b'OK' == client.execute_command(
+            "JSON.MSET",
+            k1, ".", '"Boston"',
+            k2, ".", '123',
+            k3, ".", '["Seattle","Boston"]',
+            k4, ".", '[1,2,3]',
+            k5, ".", '{"a":"b"}',
+            k6, ".", '{}',
+            k7, ".", 'null',
+            k8, ".", 'false')
+        for (key, value) in [(k1, '"Boston"'),                # string
+                             (k2, '123'),                     # number
+                             (k3, '["Seattle","Boston"]'),    # array
+                             (k4, '[1,2,3]'),                 # array
+                             (k5, '{"a":"b"}'),               # object
+                             (k6, '{}'),                      # empty object
+                             (k7, 'null'),                    # null
+                             (k8, 'false')]:                  # boolean
+            assert value.encode() == client.execute_command('JSON.GET', key)
+
     def test_json_set_command_nx_xx_options(self):
         client = self.server.get_new_client()
         for (path, value, cond, exp_set_return, exp_get_return) in [
