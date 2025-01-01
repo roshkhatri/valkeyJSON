@@ -346,23 +346,22 @@ class TestJsonBasic(JsonTestCase):
             k7, ".", 'null',
             wikipedia, '.isAlive', 'false',
             k8, ".", 'false')
-        for (key, value) in [(k1, '"Boston"'),                # string
-                             (k2, '123'),                     # number
-                             (k3, '["Seattle","Boston"]'),    # array
-                             (k4, '[1,2,3]'),                 # array
-                             (k5, '{"a":"b"}'),               # object
-                             (k6, '{}'),                      # empty object
-                             (k7, 'null'),                    # null
-                             (k8, 'false')]:                  # boolean
-            assert value.encode() == client.execute_command('JSON.GET', key)
-        for (path, value) in [('.address.city', '"Boston"'),
-                              ('.age', '30'),
-                              ('.phoneNumbers[0].number', '"1234567"'),
-                              ('.foo', '{"a":"b"}'),
-                              ('.lastName', 'null'),
-                              ('.isAlive', 'false')]:
+        for (key, path, value) in [(k1, ".", '"Boston"'),                # string
+                                   (k2, ".", '123'),                     # number
+                                   (k3, ".", '["Seattle","Boston"]'),    # array
+                                   (k4, ".", '[1,2,3]'),                 # array
+                                   (k5, ".", '{"a":"b"}'),               # object
+                                   (k6, ".", '{}'),                      # empty object
+                                   (k7, ".", 'null'),                    # null
+                                   (k8, ".", 'false'),                  # boolean
+                                   (wikipedia, '.address.city', '"Boston"'),
+                                   (wikipedia, '.age', '30'),
+                                   (wikipedia, '.phoneNumbers[0].number', '"1234567"'),
+                                   (wikipedia, '.foo', '{"a":"b"}'),
+                                   (wikipedia, '.lastName', 'null'),
+                                   (wikipedia, '.isAlive', 'false')]:
             assert value.encode() == client.execute_command(
-                'JSON.GET', wikipedia, path)
+                'JSON.GET', key, path)
 
     def test_json_set_command_nx_xx_options(self):
         client = self.server.get_new_client()
