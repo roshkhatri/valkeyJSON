@@ -287,6 +287,23 @@ class TestJsonBasic(JsonTestCase):
                 'JSON.SET', key, '.', value)
             assert value.encode() == client.execute_command('JSON.GET', key)
 
+    def test_json_mset_command_supports_all_datatypes(self):
+        client = self.server.get_new_client()
+        for (path, value) in [('.address.city', '"Boston"'),            # string
+                              # number
+                              ('.age', '30'),
+                              ('.foo', '[1,2,3]'),                      # array
+                              # array element access
+                              ('.phoneNumbers[0].number', '"1234567"'),
+                              # object
+                              ('.foo', '{"a":"b"}'),
+                              ('.lastName', 'null'),                    # null
+                              ('.isAlive', 'false')]:                   # boolean
+            assert b'OK' == client.execute_command(
+                'JSON.MSET', wikipedia, path, value)
+            assert value.encode() == client.execute_command(
+                'JSON.GET', wikipedia, path)
+
     def test_json_mset_command_root_document(self):
         client = self.server.get_new_client()
         # path to the root document is represented as '.'
@@ -309,6 +326,43 @@ class TestJsonBasic(JsonTestCase):
                              (k7, 'null'),                    # null
                              (k8, 'false')]:                  # boolean
             assert value.encode() == client.execute_command('JSON.GET', key)
+
+    def test_json_mset_command_mixed_path_document(self):
+        client = self.server.get_new_client()
+        # path to the root document is represented as '.'
+        assert b'OK' == client.execute_command(
+            "JSON.MSET",
+            k1, ".", '"Boston"',
+            wikipedia, '.address.city', '"Boston"',
+            k2, ".", '123',
+            wikipedia, '.age', '30',
+            k3, ".", '["Seattle","Boston"]',
+            k4, ".", '[1,2,3]',
+            wikipedia, '.phoneNumbers[0].number', '"1234567"',
+            k5, ".", '{"a":"b"}',
+            wikipedia, '.foo', '{"a":"b"}',
+            k6, ".", '{}',
+            wikipedia, '.lastName', 'null',
+            k7, ".", 'null',
+            wikipedia, '.isAlive', 'false',
+            k8, ".", 'false')
+        for (key, value) in [(k1, '"Boston"'),                # string
+                             (k2, '123'),                     # number
+                             (k3, '["Seattle","Boston"]'),    # array
+                             (k4, '[1,2,3]'),                 # array
+                             (k5, '{"a":"b"}'),               # object
+                             (k6, '{}'),                      # empty object
+                             (k7, 'null'),                    # null
+                             (k8, 'false')]:                  # boolean
+            assert value.encode() == client.execute_command('JSON.GET', key)
+        for (path, value) in [('.address.city', '"Boston"'),
+                              ('.age', '30'),
+                              ('.phoneNumbers[0].number', '"1234567"'),
+                              ('.foo', '{"a":"b"}'),
+                              ('.lastName', 'null'),
+                              ('.isAlive', 'false')]:
+            assert value.encode() == client.execute_command(
+                'JSON.GET', wikipedia, path)
 
     def test_json_set_command_nx_xx_options(self):
         client = self.server.get_new_client()
