@@ -347,14 +347,12 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
 
             rc = dom_verify_value(ctx, doc, current_arg.path, current_arg.json);
             if (rc != JSONUTIL_SUCCESS) {
-                dom_free_doc(doc);
                 return rc;
             }
 
             // End tracking memory and compute document size
             int64_t delta = jsonstats_end_track_mem(begin_val);
             current_arg.doc_size = dom_get_doc_size(doc) + delta;
-            dom_free_doc(doc);
         }
     }
 
