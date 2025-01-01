@@ -265,7 +265,6 @@ typedef struct {
     const char *json;               // required
     size_t json_len;
     bool is_root_path;
-    size_t doc_size;
 } MSetCmdArgs;
 
 typedef struct {
@@ -313,9 +312,6 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
             return JSONUTIL_COMMAND_SYNTAX_ERROR;
         }
 
-        // Begin tracking memory
-        int64_t begin_val = jsonstats_begin_track_mem();
-
         if (current_arg.is_root_path) {
             JDocument *doc = nullptr;
             rc = dom_parse(ctx, current_arg.json, current_arg.json_len, &doc);
@@ -323,10 +319,6 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
                 if (doc) dom_free_doc(doc);
                 return rc;
             }
-
-            // End tracking memory and compute document size
-            int64_t delta = jsonstats_end_track_mem(begin_val);
-            current_arg.doc_size = dom_get_doc_size(doc) + delta;
 
             if (json_is_instrument_enabled_insert() || json_is_instrument_enabled_update()) {
                 size_t len;
@@ -349,10 +341,6 @@ STATIC JsonUtilCode parseAndValidateMSetCmdArgs(ValkeyModuleCtx *ctx, ValkeyModu
             if (rc != JSONUTIL_SUCCESS) {
                 return rc;
             }
-
-            // End tracking memory and compute document size
-            int64_t delta = jsonstats_end_track_mem(begin_val);
-            current_arg.doc_size = dom_get_doc_size(doc) + delta;
         }
     }
 
@@ -743,6 +731,8 @@ int Command_JsonMSet(ValkeyModuleCtx *ctx, ValkeyModuleString **argv, int argc) 
 
     // Apply changes
     for (size_t i = 0; i < args.num_keys; i++) {
+        // begin tracking memory
+        int64_t begin_val = jsonstats_begin_track_mem();
 
         if (args.args_list[i].is_root_path){  // root doc
             // parse incoming JSON string
@@ -750,13 +740,16 @@ int Command_JsonMSet(ValkeyModuleCtx *ctx, ValkeyModuleString **argv, int argc) 
             rc = dom_parse(ctx, args.args_list[i].json, args.args_list[i].json_len, &doc);
             ValkeyModule_Assert(rc == JSONUTIL_SUCCESS);
 
-            dom_set_doc_size(doc, args.args_list[i].doc_size);
+            // end tracking memory
+            int64_t delta = jsonstats_end_track_mem(begin_val);
+            size_t doc_size = dom_get_doc_size(doc) + delta;
+            dom_set_doc_size(doc, doc_size);
 
             // set Valkey key
             ValkeyModule_ModuleTypeSetValue(args.args_list[i].key, DocumentType, doc);
 
             // update stats
-            jsonstats_update_stats_on_insert(doc, true, 0, args.args_list[i].doc_size, args.args_list[i].doc_size);
+            jsonstats_update_stats_on_insert(doc, true, 0, doc_size, doc_size);
         } else {
             JDocument *doc = static_cast<JDocument*>(ValkeyModule_ModuleTypeGetValue(args.args_list[i].key));
             size_t orig_doc_size = dom_get_doc_size(doc);
@@ -765,10 +758,13 @@ int Command_JsonMSet(ValkeyModuleCtx *ctx, ValkeyModuleString **argv, int argc) 
                              args.args_list[i].json_len, false, false);
             ValkeyModule_Assert(rc == JSONUTIL_SUCCESS);
 
-            dom_set_doc_size(doc, args.args_list[i].doc_size);
+            // end tracking memory
+            int64_t delta = jsonstats_end_track_mem(begin_val);
+            size_t new_doc_size = dom_get_doc_size(doc) + delta;
+            dom_set_doc_size(doc, new_doc_size);
 
             // update stats
-            jsonstats_update_stats_on_update(doc, orig_doc_size, args.args_list[i].doc_size, args.args_list[i].json_len);
+            jsonstats_update_stats_on_update(doc, orig_doc_size, new_doc_size, args.args_list[i].json_len);
         }
         ValkeyModule_NotifyKeyspaceEvent(ctx, VALKEYMODULE_NOTIFY_GENERIC, "json.mset", args.args_list[i].key_str);
     }
