@@ -2752,7 +2752,7 @@ extern "C" int ValkeyModule_OnLoad(ValkeyModuleCtx *ctx) {
         return VALKEYMODULE_ERR;
     }
 
-    if (ValkeyModule_CreateCommand(ctx, "JSON.MSET", Command_JsonMSet, cmdflg_slow_write_deny, 1, -1, 3)
+    if (ValkeyModule_CreateCommand(ctx, "JSON.MSET", Command_JsonMSet, cmdflg_slow_write_deny, 1, -3, 3)
         == VALKEYMODULE_ERR) {
         ValkeyModule_Log(ctx, "warning", "Failed to create command JSON.MSET.");
         return VALKEYMODULE_ERR;
@@ -2771,7 +2771,7 @@ extern "C" int ValkeyModule_OnLoad(ValkeyModuleCtx *ctx) {
         return VALKEYMODULE_ERR;
     }
 
-    if (ValkeyModule_CreateCommand(ctx, "JSON.MGET", Command_JsonMGet, cmdflg_readonly, 1, -1, 2) == VALKEYMODULE_ERR) {
+    if (ValkeyModule_CreateCommand(ctx, "JSON.MGET", Command_JsonMGet, cmdflg_readonly, 1, -2, 1) == VALKEYMODULE_ERR) {
         ValkeyModule_Log(ctx, "warning", "Failed to create command JSON.MGET.");
         return VALKEYMODULE_ERR;
     }
